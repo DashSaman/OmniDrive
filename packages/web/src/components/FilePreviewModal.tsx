@@ -12,8 +12,11 @@ import { useState } from 'react';
 
 export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
   const isImage = file.mimeType?.startsWith('image/');
+  const isVideo = file.mimeType?.startsWith('video/');
+  const isAudio = file.mimeType?.startsWith('audio/');
   const isGoogleDoc = file.mimeType?.startsWith('application/vnd.google-apps.');
   const [imageError, setImageError] = useState(false);
+  const mediaUrl = `${import.meta.env.VITE_API_URL || ''}/api/files/${file.id}/download?disposition=inline`;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/50 backdrop-blur-sm" onClick={onClose}>
@@ -45,6 +48,35 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
         {/* Content Body - Scrollable */}
         <div className="p-6 overflow-y-auto">
           {/* Preview */}
+          {isVideo && (
+            <div className="mb-6 overflow-hidden rounded-xl border border-gray-200 bg-black">
+              <video
+                src={mediaUrl}
+                controls
+                playsInline
+                crossOrigin="use-credentials"
+                preload="metadata"
+                className="w-full max-h-[60vh] bg-black"
+              >
+                Your browser does not support video playback.
+              </video>
+            </div>
+          )}
+
+          {isAudio && (
+            <div className="mb-6 rounded-xl border border-gray-200 bg-gray-50 p-4">
+              <audio
+                src={mediaUrl}
+                controls
+                crossOrigin="use-credentials"
+                preload="metadata"
+                className="w-full"
+              >
+                Your browser does not support audio playback.
+              </audio>
+            </div>
+          )}
+
           {isImage && file.thumbnailUrl && (
             <div className="mb-6 rounded-xl overflow-hidden bg-gray-50 border border-gray-200 flex justify-center items-center p-2 min-h-[200px]">
               {!imageError ? (
@@ -64,7 +96,7 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
             </div>
           )}
 
-          {!isImage && file.thumbnailUrl && (
+          {!isImage && !isVideo && !isAudio && file.thumbnailUrl && (
             <div className="mb-6 flex justify-center p-8 bg-gray-50 border border-gray-200 rounded-xl min-h-[200px]">
               {!imageError ? (
                 <img 

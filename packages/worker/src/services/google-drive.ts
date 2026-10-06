@@ -253,15 +253,29 @@ export class GoogleDriveService {
     return response.json();
   }
 
-  async downloadFile(driveAccountId: string, googleFileId: string, mimeType?: string): Promise<{stream: ReadableStream<Uint8Array>, exportedMimeType?: string, exportedExtension?: string}> {
+  async downloadFile(
+    driveAccountId: string,
+    googleFileId: string,
+    mimeType?: string,
+    range?: string
+  ): Promise<{
+    stream: ReadableStream<Uint8Array> | null;
+    status: number;
+    contentRange?: string;
+    contentLength?: string;
+    acceptRanges?: string;
+    exportedMimeType?: string;
+    exportedExtension?: string;
+  }> {
     const token = await this.getValidToken(driveAccountId);
 
     let url = `${DRIVE_API}/files/${googleFileId}?alt=media`;
     let exportedMimeType = undefined;
     let exportedExtension = undefined;
+    const isWorkspaceDocument = mimeType?.startsWith('application/vnd.google-apps.') ?? false;
 
     // Handle Google Workspace documents by exporting them
-    if (mimeType && mimeType.startsWith('application/vnd.google-apps.')) {
+    if (isWorkspaceDocument) {
       if (mimeType === 'application/vnd.google-apps.spreadsheet') {
         exportedMimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
         exportedExtension = '.xlsx';
@@ -279,19 +293,28 @@ export class GoogleDriveService {
       url = `${DRIVE_API}/files/${googleFileId}/export?mimeType=${exportedMimeType}`;
     }
 
+    const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+    if (range && !isWorkspaceDocument) {
+      headers.Range = range;
+    }
+
     const response = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers,
     });
 
-    if (!response.ok) {
+    if (!response.ok && response.status !== 416) {
       throw new Error(`Failed to download file: ${await response.text()}`);
     }
 
-    if (!response.body) {
+    if (!response.body && response.status !== 416) {
       throw new Error('Response body is null');
     }
     return {
       stream: response.body as ReadableStream<Uint8Array>,
+      status: response.status,
+      contentRange: response.headers.get('Content-Range') ?? undefined,
+      contentLength: response.headers.get('Content-Length') ?? undefined,
+      acceptRanges: response.headers.get('Accept-Ranges') ?? undefined,
       exportedMimeType,
       exportedExtension
     };

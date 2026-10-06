@@ -599,14 +599,23 @@ filesRouter.get('/:id/download', async (c) => {
   let stream: ReadableStream<Uint8Array>;
   let finalMimeType = (file.mime_type as string) || 'application/octet-stream';
   let finalFileName = file.name as string;
+  let downloadStatus = 200;
+  let upstreamContentRange: string | undefined;
+  let upstreamContentLength: string | undefined;
+  let upstreamAcceptRanges: string | undefined;
 
   try {
     const downloadResult = await driveService.downloadFile(
       file.drive_account_id as string,
       file.google_file_id as string,
-      file.mime_type as string
+      file.mime_type as string,
+      c.req.header('Range')
     );
-    stream = downloadResult.stream;
+    stream = downloadResult.stream as ReadableStream<Uint8Array>;
+    downloadStatus = downloadResult.status;
+    upstreamContentRange = downloadResult.contentRange;
+    upstreamContentLength = downloadResult.contentLength;
+    upstreamAcceptRanges = downloadResult.acceptRanges;
     
     if (downloadResult.exportedMimeType && downloadResult.exportedExtension) {
       finalMimeType = downloadResult.exportedMimeType;
@@ -618,10 +627,16 @@ filesRouter.get('/:id/download', async (c) => {
   }
   
   c.header('Content-Type', finalMimeType);
-  c.header('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(finalFileName)}`);
-  if (file.size && !finalFileName.endsWith('.pdf') && !finalFileName.endsWith('.xlsx')) {
+  const wantsInline = c.req.query('disposition') === 'inline';
+  const isMedia = finalMimeType.startsWith('video/') || finalMimeType.startsWith('audio/');
+  c.header('Content-Disposition', `${wantsInline && isMedia ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(finalFileName)}`);
+  if (upstreamContentRange) c.header('Content-Range', upstreamContentRange);
+  if (upstreamAcceptRanges) c.header('Accept-Ranges', upstreamAcceptRanges);
+  if (upstreamContentLength) {
+    c.header('Content-Length', upstreamContentLength);
+  } else if (downloadStatus === 200 && file.size && !finalFileName.endsWith('.pdf') && !finalFileName.endsWith('.xlsx')) {
     c.header('Content-Length', String(file.size));
   }
   
-  return c.body(stream);
+  return c.body(stream ?? null, downloadStatus as any);
 });

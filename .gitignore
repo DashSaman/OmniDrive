@@ -18,6 +18,7 @@ wrangler.toml
 
 # Local overrides
 *.local
+.worktrees/
 
 # OS files
 .DS_Store

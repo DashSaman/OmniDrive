@@ -596,7 +596,9 @@ describe('S3 API compatibility endpoints', () => {
             controller.enqueue(new TextEncoder().encode('file content'));
             controller.close();
           }
-        })
+        }),
+        status: 200,
+        contentLength: '12'
       });
 
       const amzDate = '20260621T120000Z';
@@ -631,8 +633,65 @@ describe('S3 API compatibility endpoints', () => {
       expect(res.headers.get('Content-Length')).toBe('12');
       const body = await res.text();
       expect(body).toBe('file content');
-      expect(downloadSpy).toHaveBeenCalledWith('drive-123', 'g-123');
+      expect(downloadSpy).toHaveBeenCalledWith('drive-123', 'g-123', 'image/jpeg', undefined);
       downloadSpy.mockRestore();
+    });
+
+    it('returns 206 and range metadata for a ranged GetObject', async () => {
+      const workspaceResolved = { id: 'ws-1' };
+      const fileResolved = {
+        id: 'file-123',
+        drive_account_id: 'drive-123',
+        google_file_id: 'g-123',
+        workspace_id: 'ws-1',
+        workspace_folder_id: 'folder-123',
+        name: 'movie.mp4',
+        mime_type: 'video/mp4',
+        size: 1000,
+        is_trashed: 0
+      };
+
+      const env = await getMockEnv({
+        workspaceResolved,
+        fileResolved,
+        folderResolved: { id: 'folder-123' }
+      });
+
+      vi.spyOn(GoogleDriveService.prototype, 'downloadFile').mockImplementation(async (_drive, _file, _mime, range) => ({
+        stream: new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(range === 'bytes=0-99' ? 'partial' : 'wrong-range'));
+            controller.close();
+          }
+        }),
+        status: range === 'bytes=0-99' ? 206 : 200,
+        contentRange: range === 'bytes=0-99' ? 'bytes 0-99/1000' : undefined,
+        contentLength: range === 'bytes=0-99' ? '100' : '1000',
+        acceptRanges: 'bytes'
+      }));
+
+      const amzDate = '20260621T120000Z';
+      const dateStr = '20260621';
+      const path = '/s3/my-bucket-1/videos/movie.mp4';
+      const headers = {
+        'host': 'localhost:8787',
+        'range': 'bytes=0-99',
+        'x-amz-date': amzDate,
+        'x-amz-content-sha256': sha256('')
+      };
+      const { signature, signedHeaders } = calculateSigV4({ method: 'GET', path, headers, dateStr, amzDate });
+      const authHeader = `AWS4-HMAC-SHA256 Credential=${ACCESS_KEY_ID}/${dateStr}/us-east-1/s3/aws4_request, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+
+      const res = await app.request(path, {
+        method: 'GET',
+        headers: { ...headers, Authorization: authHeader }
+      }, env);
+
+      expect(res.status).toBe(206);
+      expect(res.headers.get('Content-Range')).toBe('bytes 0-99/1000');
+      expect(res.headers.get('Content-Length')).toBe('100');
+      expect(res.headers.get('Accept-Ranges')).toBe('bytes');
+      expect(await res.text()).toBe('partial');
     });
 
     it('retrieves metadata of an object (HeadObject)', async () => {

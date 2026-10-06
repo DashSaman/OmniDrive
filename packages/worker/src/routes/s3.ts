@@ -325,11 +325,22 @@ s3Router.get('/:bucket/:key{.+}', async (c) => {
     c.env.TOKEN_ENCRYPTION_KEY
   );
 
-  const { stream } = await driveService.downloadFile(file.drive_account_id, file.google_file_id);
+  const downloadResult = await driveService.downloadFile(
+    file.drive_account_id,
+    file.google_file_id,
+    file.mime_type,
+    c.req.header('Range')
+  );
   c.header('Content-Type', file.mime_type || 'application/octet-stream');
-  c.header('Content-Length', String(file.size));
+  if (downloadResult.contentRange) c.header('Content-Range', downloadResult.contentRange);
+  if (downloadResult.acceptRanges) c.header('Accept-Ranges', downloadResult.acceptRanges);
+  if (downloadResult.contentLength) {
+    c.header('Content-Length', downloadResult.contentLength);
+  } else if (downloadResult.status === 200) {
+    c.header('Content-Length', String(file.size));
+  }
   c.header('ETag', `"${getFileETag(file)}"`);
-  return c.body(stream);
+  return c.body(downloadResult.stream, downloadResult.status as any);
 });
 
 // DELETE /s3/:bucket/:key (DeleteObject)
@@ -767,4 +778,3 @@ s3Router.post('/:bucket/:key{.+}', async (c) => {
 
   return c.text('Invalid query parameter sequence', 400);
 });
-
