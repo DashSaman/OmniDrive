@@ -1,4 +1,4 @@
-name = "omnidrive-api"
+name = "omnidrive-family-api"
 main = "src/index.ts"
 compatibility_date = "2025-06-01"
 compatibility_flags = [ "nodejs_compat_v2" ]
@@ -9,14 +9,15 @@ crons = ["*/30 * * * *"]
 [[d1_databases]]
 binding = "DB"
 database_name = "omnidrive"
-database_id = "72bd51b7-0869-4ead-9712-a76237904d81"
+database_id = "a0b8d7a2-009c-42ec-8dd5-c721d9285866"
 
 [[kv_namespaces]]
 binding = "KV"
-id = "e1938e5a2fce4999bd1556612cccfeaa"
+id = "32ee25caf762400b856b27569c6b3e5b"
 
 [vars]
-FRONTEND_URL = "https://omnidrive.pages.dev"
+FRONTEND_URL = "https://omnidrive-family-web.pages.dev"
+WORKER_URL = "https://omnidrive-family-api.golamirreza19954312.workers.dev"
 
 [observability]
 enabled = false
