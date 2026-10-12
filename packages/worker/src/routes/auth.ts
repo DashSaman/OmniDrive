@@ -151,8 +151,11 @@ authRouter.get('/callback', async (c) => {
   const targetUserId = c.get('userId');
   const db = env.DB;
 
-  await db.prepare('UPDATE users SET google_id = ? WHERE id = ?')
-    .bind(googleUser.id, targetUserId).run();
+  // A Google account is a connected Drive credential, not the identity of
+  // the local OmniDrive user. The users.google_id column is globally UNIQUE,
+  // so updating it here would prevent two household members from connecting
+  // the same shared Google Drive account under their separate local profiles.
+  // Per-user connection uniqueness is enforced by drive_accounts instead.
 
   let drive = await db.prepare('SELECT id FROM drive_accounts WHERE google_account_id = ? AND user_id = ?').bind(googleUser.id, targetUserId).first<{ id: string }>();
   if (!drive) {
