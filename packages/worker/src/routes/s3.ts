@@ -328,7 +328,13 @@ s3Router.get('/:bucket/:key{.+}', async (c) => {
   const range = c.req.header('Range');
   let result: Awaited<ReturnType<GoogleDriveService['downloadFile']>>;
   try {
-    result = await driveService.downloadFile(file.drive_account_id, file.google_file_id, file.mime_type, range);
+    // Preserve ordinary S3 GetObject behavior when there is no Range header.
+    // Native Workspace documents need their MIME type for Google export.
+    result = range
+      ? await driveService.downloadFile(file.drive_account_id, file.google_file_id, file.mime_type, range)
+      : (file.mime_type?.startsWith('application/vnd.google-apps.')
+        ? await driveService.downloadFile(file.drive_account_id, file.google_file_id, file.mime_type)
+        : await driveService.downloadFile(file.drive_account_id, file.google_file_id));
   } catch (e: any) {
     if (e?.status === 416) return c.text('Requested range not satisfiable', 416);
     throw e;
