@@ -12,6 +12,9 @@ import { useState } from 'react';
 
 export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
   const isImage = file.mimeType?.startsWith('image/');
+  const isVideo = file.mimeType?.startsWith('video/');
+  const isAudio = file.mimeType?.startsWith('audio/');
+  const mediaUrl = `${import.meta.env.VITE_API_URL || ''}/api/files/${encodeURIComponent(file.id)}/download?inline=1`;
   const isGoogleDoc = file.mimeType?.startsWith('application/vnd.google-apps.');
   const [imageError, setImageError] = useState(false);
 
@@ -45,6 +48,26 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
         {/* Content Body - Scrollable */}
         <div className="p-6 overflow-y-auto">
           {/* Preview */}
+          {(isVideo || isAudio) && (
+            <div className="mb-6 rounded-xl border border-gray-200 bg-gray-950 p-2">
+              {isVideo ? (
+                <video
+                  src={mediaUrl}
+                  controls
+                  playsInline
+                  preload="metadata"
+                  className="w-full max-h-[55vh] rounded-lg bg-black"
+                >
+                  Your browser does not support this video format.
+                </video>
+              ) : (
+                <audio src={mediaUrl} controls preload="metadata" className="w-full" />
+              )}
+              <p className="mt-2 px-1 text-xs text-gray-300">
+                Playback requires a supported browser and a valid sign-in session. If playback fails, use Open in Drive.
+              </p>
+            </div>
+          )}
           {isImage && file.thumbnailUrl && (
             <div className="mb-6 rounded-xl overflow-hidden bg-gray-50 border border-gray-200 flex justify-center items-center p-2 min-h-[200px]">
               {!imageError ? (
