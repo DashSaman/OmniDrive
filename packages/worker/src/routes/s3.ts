@@ -333,14 +333,15 @@ s3Router.get('/:bucket/:key{.+}', async (c) => {
     if (e?.status === 416) return c.text('Requested range not satisfiable', 416);
     throw e;
   }
+  const status = result.status ?? 200; // Keep older download adapters compatible.
   c.header('Content-Type', result.exportedMimeType || file.mime_type || 'application/octet-stream');
-  c.header('Accept-Ranges', 'bytes');
+  if (!result.exportedMimeType) c.header('Accept-Ranges', 'bytes');
   c.header('Cache-Control', 'private, no-store');
   if (result.contentRange) c.header('Content-Range', result.contentRange);
   if (result.contentLength) c.header('Content-Length', result.contentLength);
-  else if (result.status === 200 && file.size && !result.exportedMimeType) c.header('Content-Length', String(file.size));
+  else if (status === 200 && file.size && !result.exportedMimeType) c.header('Content-Length', String(file.size));
   c.header('ETag', `"${getFileETag(file)}"`);
-  return c.body(result.stream, result.status);
+  return c.body(result.stream, status);
 });
 
 // DELETE /s3/:bucket/:key (DeleteObject)
