@@ -325,11 +325,22 @@ s3Router.get('/:bucket/:key{.+}', async (c) => {
     c.env.TOKEN_ENCRYPTION_KEY
   );
 
-  const { stream } = await driveService.downloadFile(file.drive_account_id, file.google_file_id);
-  c.header('Content-Type', file.mime_type || 'application/octet-stream');
-  c.header('Content-Length', String(file.size));
+  const range = c.req.header('Range');
+  let result: Awaited<ReturnType<GoogleDriveService['downloadFile']>>;
+  try {
+    result = await driveService.downloadFile(file.drive_account_id, file.google_file_id, file.mime_type, range);
+  } catch (e: any) {
+    if (e?.status === 416) return c.text('Requested range not satisfiable', 416);
+    throw e;
+  }
+  c.header('Content-Type', result.exportedMimeType || file.mime_type || 'application/octet-stream');
+  c.header('Accept-Ranges', 'bytes');
+  c.header('Cache-Control', 'private, no-store');
+  if (result.contentRange) c.header('Content-Range', result.contentRange);
+  if (result.contentLength) c.header('Content-Length', result.contentLength);
+  else if (result.status === 200 && file.size && !result.exportedMimeType) c.header('Content-Length', String(file.size));
   c.header('ETag', `"${getFileETag(file)}"`);
-  return c.body(stream);
+  return c.body(result.stream, result.status);
 });
 
 // DELETE /s3/:bucket/:key (DeleteObject)
