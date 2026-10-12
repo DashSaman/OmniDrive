@@ -8,7 +8,6 @@ import { syncDriveAccount } from '../services/sync';
 import { mapDriveRow, mapDriveFolderRow, mapFileRow } from '../types';
 import { generateId } from '../lib/id';
 import type { BreadcrumbItem } from '../types';
-import { decryptOrPassthrough } from '../lib/crypto';
 import { generatePKCE } from '../lib/pkce';
 
 export async function buildDriveBreadcrumb(db: D1Database, driveId: string, googleFolderId: string): Promise<BreadcrumbItem[]> {
@@ -87,14 +86,10 @@ drivesRouter.get('/', async (c) => {
   const drivesWithQuota = await Promise.all(drives.map(async (drive) => {
     const encryptedTokens = await c.env.KV.get(`tokens:${drive.id}`);
     if (!encryptedTokens) return { ...drive, freeSpace: 0, usagePercent: 0 };
-    const tokenJson = await decryptOrPassthrough(encryptedTokens, c.env.TOKEN_ENCRYPTION_KEY);
 
     try {
       // Use the robust GoogleDriveService which handles token caching & refreshing
       const driveService = new GoogleDriveService(c.env.KV, c.env.GOOGLE_CLIENT_ID, c.env.GOOGLE_CLIENT_SECRET, c.env.TOKEN_ENCRYPTION_KEY);
-      
-      // Ensure available under oauth: prefix for GoogleDriveService
-      await c.env.KV.put(`oauth:${drive.id}`, tokenJson);
       
       const quota = await driveService.getQuota(drive.id);
 
@@ -233,13 +228,10 @@ drivesRouter.post('/:driveId/folders/:googleFolderId/sync', async (c) => {
     });
   }
 
-  // Fetch tokens
+  // Verify encrypted credentials exist; GoogleDriveService decrypts tokens itself.
+  // Never duplicate plaintext OAuth credentials in KV.
   const encryptedTokens = await c.env.KV.get(`tokens:${driveId}`);
   if (!encryptedTokens) return c.json({ error: 'No tokens for drive' }, 400);
-  const tokenJson = await decryptOrPassthrough(encryptedTokens, c.env.TOKEN_ENCRYPTION_KEY);
-
-  // Ensure available under oauth: prefix for GoogleDriveService
-  await c.env.KV.put(`oauth:${driveId}`, tokenJson);
 
   const driveService = new GoogleDriveService(c.env.KV, c.env.GOOGLE_CLIENT_ID, c.env.GOOGLE_CLIENT_SECRET, c.env.TOKEN_ENCRYPTION_KEY);
   const { files: gFiles, folders: gFolders } = await driveService.listFolderContents(driveId, googleFolderId);
