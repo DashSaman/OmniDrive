@@ -272,7 +272,7 @@ export const s3AuthMiddleware: MiddlewareHandler = async (c, next) => {
     outerLoop:
     for (const pathCandidate of pathCandidates) {
       for (const aeVal of acceptEncodingValues) {
-        const overrides = signedHeadersList.includes('accept-encoding')
+        const overrides: Record<string, string> = signedHeadersList.includes('accept-encoding')
           ? { 'accept-encoding': aeVal }
           : {};
           

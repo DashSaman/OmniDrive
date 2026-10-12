@@ -11,7 +11,8 @@
     "db:migrate:local": "wrangler d1 execute omnidrive --local --file=src/db/schema.sql",
     "db:migrate:remote": "wrangler d1 execute omnidrive --remote --file=src/db/schema.sql",
     "db:reset:local": "node scripts/reset.mjs --local",
-    "db:reset:remote": "node scripts/reset.mjs --remote"
+    "db:reset:remote": "node scripts/reset.mjs --remote",
+    "typecheck": "tsc --noEmit -p tsconfig.runtime.json"
   },
   "dependencies": {
     "@hono/node-server": "^2.0.4",

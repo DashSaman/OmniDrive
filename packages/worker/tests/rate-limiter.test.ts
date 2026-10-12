@@ -50,3 +50,25 @@ describe('rateLimiter', () => {
     expect(res2.status).toBe(200);
   });
 });
+
+describe('independent rate budgets', () => {
+  it('does not let normal API traffic consume the login budget', async () => {
+    _resetStoreForTesting();
+    const app = new Hono();
+    app.use('/login', rateLimiter({ windowMs: 60000, maxRequests: 2 }));
+    app.use('*', rateLimiter({ windowMs: 60000, maxRequests: 100 }));
+    app.get('/files', c => c.text('files'));
+    app.get('/login', c => c.text('login'));
+    for (let i=0; i<5; i++) await app.request('/files');
+    expect((await app.request('/login')).status).toBe(200);
+    expect((await app.request('/login')).status).toBe(200);
+    expect((await app.request('/login')).status).toBe(429);
+  });
+});
+
+it('constructs middleware without generating random values in Worker global scope', async () => {
+  const original = crypto.randomUUID;
+  crypto.randomUUID = () => { throw new Error('Disallowed global random generation'); };
+  try { expect(() => rateLimiter({windowMs:60000,maxRequests:10})).not.toThrow(); }
+  finally { crypto.randomUUID = original; }
+});

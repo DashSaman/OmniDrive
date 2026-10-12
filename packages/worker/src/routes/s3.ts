@@ -199,12 +199,12 @@ ${contentsXml}${prefixesXml}</ListBucketResult>`;
 });
 
 // Helpers to resolve virtual folders dynamically
-async function getWorkspaceFolder(db: any, workspaceId: string, folderPath: string): Promise<string | null | undefined> {
+async function getWorkspaceFolder(db: D1Database, workspaceId: string, folderPath: string): Promise<string | null | undefined> {
   if (!folderPath) return null;
   const segments = folderPath.split('/').filter(Boolean);
   let parentId: string | null = null;
   for (const name of segments) {
-    const existing = await db.prepare(`
+    const existing: {id: string} | null = await db.prepare(`
       SELECT id FROM workspace_folders 
       WHERE workspace_id = ? AND name = ? AND (parent_id = ? OR (parent_id IS NULL AND ? IS NULL))
     `).bind(workspaceId, name, parentId, parentId).first<any>();
@@ -214,13 +214,13 @@ async function getWorkspaceFolder(db: any, workspaceId: string, folderPath: stri
   return parentId;
 }
 
-async function getOrCreateWorkspaceFolder(db: any, workspaceId: string, folderPath: string): Promise<string | null> {
+async function getOrCreateWorkspaceFolder(db: D1Database, workspaceId: string, folderPath: string): Promise<string | null> {
   if (!folderPath) return null;
   const segments = folderPath.split('/').filter(Boolean);
   let parentId: string | null = null;
 
   for (const name of segments) {
-    const existing = await db.prepare(`
+    const existing: {id: string} | null = await db.prepare(`
       SELECT id FROM workspace_folders 
       WHERE workspace_id = ? AND name = ? AND (parent_id = ? OR (parent_id IS NULL AND ? IS NULL))
     `).bind(workspaceId, name, parentId, parentId).first<any>();
@@ -541,7 +541,7 @@ s3Router.put('/:bucket/:key{.+}', async (c) => {
 });
 
 // Helper to upload a part
-async function handleUploadPart(c: any, uploadId: string, partNumber: number): Promise<Response> {
+async function handleUploadPart(c: import('hono').Context<AppContext>, uploadId: string, partNumber: number): Promise<Response> {
   const userId = c.get('userId');
   const s3WorkspaceId = c.get('s3WorkspaceId') || null;
   const db = c.env.DB;

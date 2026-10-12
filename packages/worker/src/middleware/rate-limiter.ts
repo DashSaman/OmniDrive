@@ -6,6 +6,7 @@ interface RateLimitEntry {
 
 const store = new Map<string, RateLimitEntry>();
 let lastCleanup = Date.now();
+let nextNamespace = 0;
 const CLEANUP_INTERVAL = 5 * 60 * 1000;
 
 function cleanup(windowMs: number) {
@@ -25,14 +26,17 @@ interface RateLimitOptions {
 }
 
 export function rateLimiter(opts: RateLimitOptions) {
+  // Each middleware has a separate budget, even when stacked on one route.
+  const namespace = ++nextNamespace;
   return createMiddleware(async (c, next) => {
     cleanup(opts.windowMs);
 
-    const key = opts.keyFn
+    const clientKey = opts.keyFn
       ? opts.keyFn(c)
       : c.req.header('CF-Connecting-IP') ??
         c.req.header('X-Real-IP') ??
         'unknown';
+    const key = `${namespace}:${clientKey}`;
 
     const now = Date.now();
     const entry = store.get(key) ?? { timestamps: [] };

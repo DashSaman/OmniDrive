@@ -201,7 +201,8 @@ export class GoogleDriveService {
     driveAccountId: string,
     fileName: string,
     mimeType: string,
-    parentFolderId: string
+    parentFolderId: string,
+    frontendOrigin?: string
   ): Promise<string> {
     const token = await this.getValidToken(driveAccountId);
 
@@ -213,6 +214,7 @@ export class GoogleDriveService {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
           'X-Upload-Content-Type': mimeType,
+          ...(frontendOrigin ? { Origin: frontendOrigin } : {}),
         },
         body: JSON.stringify({
           name: fileName,

@@ -9,6 +9,7 @@ export function LoginPage() {
   const [password, setPassword] = useState('');
   const [email, setEmail] = useState('');
   const [invitationCode, setInvitationCode] = useState('');
+  const [setupToken, setSetupToken] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -16,7 +17,7 @@ export function LoginPage() {
     setErrorMsg('');
     try {
       if (isRegister) {
-        await api.register({ name, username, password, email, invitation_code: invitationCode });
+        await api.register({ name, username, password, email, invitation_code: invitationCode, setup_token: setupToken });
       } else {
         await api.login({ username, password });
       }
@@ -66,8 +67,12 @@ export function LoginPage() {
                   <input type="email" value={email} onChange={e => setEmail(e.target.value)} className="w-full px-4 py-2 border rounded-xl focus:ring-2 focus:ring-blue-500" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Invitation Code (Required)</label>
-                  <input type="text" required value={invitationCode} onChange={e => setInvitationCode(e.target.value)} className="w-full px-4 py-2 border rounded-xl focus:ring-2 focus:ring-blue-500" />
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Invitation Code (family members)</label>
+                  <input type="text" value={invitationCode} onChange={e => setInvitationCode(e.target.value)} className="w-full px-4 py-2 border rounded-xl focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Owner setup key (first account only)</label>
+                  <input type="password" autoComplete="off" value={setupToken} onChange={e => setSetupToken(e.target.value)} className="w-full px-4 py-2 border rounded-xl focus:ring-2 focus:ring-blue-500" />
                 </div>
               </>
             )}

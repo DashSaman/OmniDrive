@@ -24,5 +24,7 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Worker unit tests
         run: npm run test -w packages/worker
+      - name: Worker runtime TypeScript check
+        run: npm run typecheck -w packages/worker
       - name: Frontend build and TypeScript check
         run: npm run build -w packages/web
