@@ -7,7 +7,7 @@
   "author": "abilfida",
   "repository": {
     "type": "git",
-    "url": "https://github.com/abilfida/omnidrive.git"
+    "url": "https://github.com/DashSaman/OmniDrive.git"
   },
   "workspaces": [
     "packages/worker",
@@ -19,7 +19,9 @@
     "dev": "node -r dotenv/config ./node_modules/.bin/concurrently \"npm run dev:worker\" \"npm run dev:web\"",
     "build:worker": "npm run build -w packages/worker",
     "build:web": "npm run build -w packages/web",
-    "test": "npm run test -w packages/worker"
+    "test": "npm run test -w packages/worker",
+    "build": "npm run build:web && npm run build:worker",
+    "deploy": "npm run build:web && npm run deploy -w packages/worker"
   },
   "devDependencies": {
     "@clack/prompts": "^1.5.1",

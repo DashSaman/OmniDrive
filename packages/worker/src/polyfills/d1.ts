@@ -43,13 +43,13 @@ export class D1PreparedStatementWrapper {
     });
   }
 
-  async run(): Promise<{ success: boolean }> {
+  async run(): Promise<{ success: boolean; meta: { changes: number } }> {
     return new Promise((resolve, reject) => {
       setImmediate(() => {
         try {
           const stmt = this.db.prepare(this.query);
-          stmt.run(...this.params);
-          resolve({ success: true });
+          const result = stmt.run(...this.params);
+          resolve({ success: true, meta: { changes: result.changes } });
         } catch (e) {
           reject(e);
         }

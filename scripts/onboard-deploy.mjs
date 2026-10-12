@@ -60,8 +60,8 @@ async function getBaseUrls(target, defaultPort = '3000') {
     defaultFrontend = 'http://localhost:5173';
     defaultWorker = 'http://localhost:8787';
   } else if (target === 'cloudflare') {
-    defaultFrontend = 'https://omnidrive.pages.dev';
-    defaultWorker = 'https://omnidrive-api.serunix.workers.dev';
+    defaultFrontend = 'https://omnidrive-family.golamirreza19954312.workers.dev';
+    defaultWorker = defaultFrontend;
   }
 
   const frontendUrl = checkCancel(await text({

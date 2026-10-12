@@ -3,7 +3,7 @@ import type { AppContext } from '../types/env';
 import { generateId } from '../lib/id';
 import { authGuard } from '../middleware/auth-guard';
 import { AppError } from '../middleware/error-handler';
-import { DriveService } from '../services/drive.service';
+import { getWorkspaceRole, hasPermission } from '../middleware/rbac';
 import { GoogleDriveService } from '../services/google-drive';
 import { UploadRouter } from '../services/upload-router';
 import { AutomationEngine } from '../services/automation.service';
@@ -231,13 +231,12 @@ filesRouter.patch('/:id/rename', async (c) => {
 filesRouter.patch('/:id/move', async (c) => {
   const userId = c.get('userId');
   const fileId = c.req.param('id');
-  const { folderId } = await c.req.json();
-
-  const folder = await c.env.DB.prepare('SELECT workspace_id FROM workspace_folders WHERE id = ?').bind(folderId).first<{ workspace_id: string }>();
-  if (!folder && folderId) throw new AppError(404, 'Folder not found');
-
-  await c.env.DB.prepare('UPDATE files SET workspace_folder_id = ?, workspace_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?')
-    .bind(folderId, folder?.workspace_id || null, fileId, userId).run();
+  const { folderId, workspaceFolderId } = await c.req.json();
+  const targetFolderId = workspaceFolderId ?? folderId ?? null;
+  const workspaceId = await uploadWorkspace(c, targetFolderId || undefined);
+  const updated = await c.env.DB.prepare('UPDATE files SET workspace_folder_id = ?, workspace_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?')
+    .bind(targetFolderId, workspaceId || null, fileId, userId).run();
+  if (!updated.meta.changes) throw new AppError(404, 'File not found');
 
   return c.json({ success: true });
 });
@@ -346,66 +345,54 @@ filesRouter.post('/:id/move-drive', async (c) => {
 });
 
 // Initialize upload (returns Google Drive Resumable URL)
+async function uploadWorkspace(c: import('hono').Context<AppContext>, folderId?: string, requestedWorkspaceId?: string) {
+  let workspaceId = requestedWorkspaceId;
+  if (folderId) {
+    const folder = await c.env.DB.prepare('SELECT workspace_id FROM workspace_folders WHERE id = ?').bind(folderId).first<{ workspace_id: string }>();
+    if (!folder) throw new AppError(404, 'Workspace folder not found');
+    if (workspaceId && workspaceId !== folder.workspace_id) throw new AppError(400, 'Workspace folder mismatch');
+    workspaceId = folder.workspace_id;
+  }
+  if (workspaceId) {
+    const role = await getWorkspaceRole(c.env.DB, workspaceId, c.get('userId'));
+    if (!role || !hasPermission(role, 'editor')) throw new AppError(403, 'Workspace upload forbidden');
+  }
+  return workspaceId;
+}
+
 filesRouter.post('/upload/init', async (c) => {
   const userId = c.get('userId');
-  const { name, mimeType, size, folderId, workspaceId } = await c.req.json();
-  console.log(`Init upload for folder: ${folderId}`); // prevent unused var error
+  const { name, mimeType, size, driveAccountId, workspaceFolderId, folderId, workspaceId: requestedWorkspaceId } = await c.req.json();
+  if (typeof name !== 'string' || !name.trim() || typeof mimeType !== 'string' || !Number.isSafeInteger(size) || size < 0) {
+    throw new AppError(400, 'Valid file name, MIME type and size required');
+  }
+  const workspaceId = await uploadWorkspace(c, workspaceFolderId || folderId, requestedWorkspaceId);
   const db = c.env.DB;
-
   if (workspaceId && size) {
     const policyService = new PolicyService(db);
-    const hasQuota = await policyService.checkQuota(workspaceId, size);
-    if (!hasQuota) {
-      return c.json({ error: 'Storage quota exceeded' }, 403);
-    }
+    if (!await policyService.checkQuota(workspaceId, size)) throw new AppError(403, 'Storage quota exceeded');
   }
-
-  // 1. Get all drives to calculate routing
   const { results: driveRows } = await db.prepare('SELECT * FROM drive_accounts WHERE user_id = ?').bind(userId).all();
-  if (driveRows.length === 0) throw new AppError(400, 'No connected drives');
-
-  const drives = driveRows.map(mapDriveRow).map((d) => ({
-    ...d,
-    freeSpace: Math.max(0, d.totalQuota - d.usedQuota),
-    usagePercent: d.totalQuota > 0 ? (d.usedQuota / d.totalQuota) * 100 : 0
+  const drives = driveRows.map(mapDriveRow).map(d => ({
+    ...d, freeSpace: Math.max(0, d.totalQuota - d.usedQuota),
+    usagePercent: d.totalQuota > 0 ? (d.usedQuota / d.totalQuota) * 100 : 0,
   }));
-
-  // 2. Select target drive using UploadRouter
-  const router = new UploadRouter(drives);
-  const targetDrive = router.selectDriveForUpload(size);
-
-  // 3. Get token for target drive
-  const tokenJson = await c.env.KV.get(`tokens:${targetDrive.id}`);
-  if (!tokenJson) throw new AppError(401, 'Drive token missing');
-  const tokens = JSON.parse(tokenJson);
-
-  // 4. Create resumable upload session in Google Drive
-  const driveService = new DriveService(c.env, targetDrive.id, tokens);
-  
-  // Note: we place it in root or a specific Omnidrive hidden folder inside Google Drive.
-  // For simplicity, we just put it in root of that specific Drive.
-  const uploadUrl = await driveService.createResumableUploadSession({
-    name,
-    mimeType,
-  });
-
-  // 5. Return the URL so the client can stream bytes directly to Google
-  return c.json({
-    uploadUrl,
-    driveAccountId: targetDrive.id,
-    googleFolderId: targetDrive.rootFolderId,
-  });
+  const targetDrive = new UploadRouter(drives).selectDriveForUpload(size, driveAccountId);
+  const driveService = new GoogleDriveService(c.env.KV, c.env.GOOGLE_CLIENT_ID, c.env.GOOGLE_CLIENT_SECRET, c.env.TOKEN_ENCRYPTION_KEY);
+  const uploadUrl = await driveService.initiateResumableUpload(targetDrive.id, name, mimeType, targetDrive.rootFolderId || 'root', c.env.FRONTEND_URL);
+  return c.json({ uploadUrl, driveAccountId: targetDrive.id, googleFolderId: targetDrive.rootFolderId || 'root' });
 });
 
 filesRouter.post('/upload/finalize', async (c) => {
   const userId = c.get('userId');
-  const { googleFileId, driveAccountId, virtualFolderId, workspaceFolderId, workspaceId } = await c.req.json();
+  const { googleFileId, driveAccountId, virtualFolderId, workspaceFolderId, workspaceId: requestedWorkspaceId } = await c.req.json();
 
   if (!googleFileId || !driveAccountId) {
     throw new AppError(400, 'Missing required fields: googleFileId, driveAccountId');
   }
 
   const finalFolderId = workspaceFolderId || virtualFolderId;
+  const workspaceId = await uploadWorkspace(c, finalFolderId, requestedWorkspaceId);
 
   // Verify drive belongs to user
   const db = c.env.DB;
@@ -422,6 +409,9 @@ filesRouter.post('/upload/finalize', async (c) => {
 
   const id = generateId();
   const fileSize = parseInt(gFile.size || '0', 10);
+  if (workspaceId && fileSize > 0 && !await new PolicyService(db).checkQuota(workspaceId, fileSize)) {
+    throw new AppError(403, 'Storage quota exceeded');
+  }
   
   await db.prepare(`
     INSERT INTO files (
@@ -596,32 +586,39 @@ filesRouter.get('/:id/download', async (c) => {
     c.env.TOKEN_ENCRYPTION_KEY
   );
 
-  let stream: ReadableStream<Uint8Array>;
+  let downloadResult: Awaited<ReturnType<GoogleDriveService['downloadFile']>>;
   let finalMimeType = (file.mime_type as string) || 'application/octet-stream';
   let finalFileName = file.name as string;
 
   try {
-    const downloadResult = await driveService.downloadFile(
+    downloadResult = await driveService.downloadFile(
       file.drive_account_id as string,
       file.google_file_id as string,
-      file.mime_type as string
+      file.mime_type as string,
+      c.req.header('Range')
     );
-    stream = downloadResult.stream;
     
     if (downloadResult.exportedMimeType && downloadResult.exportedExtension) {
       finalMimeType = downloadResult.exportedMimeType;
       finalFileName = `${finalFileName}${downloadResult.exportedExtension}`;
     }
   } catch (e: any) {
+    if (e?.status === 416) return c.text('Requested range not satisfiable', 416);
     console.error('Download error:', e);
     return c.text('Failed to download file', 502);
   }
-  
+
+  c.header('Cache-Control', 'private, no-store');
   c.header('Content-Type', finalMimeType);
-  c.header('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(finalFileName)}`);
-  if (file.size && !finalFileName.endsWith('.pdf') && !finalFileName.endsWith('.xlsx')) {
+  const disposition = c.req.query('inline') === '1' ? 'inline' : 'attachment';
+  c.header('Content-Disposition', `${disposition}; filename*=UTF-8''${encodeURIComponent(finalFileName)}`);
+  if (!downloadResult.exportedMimeType) c.header('Accept-Ranges', 'bytes');
+  if (downloadResult.contentRange) c.header('Content-Range', downloadResult.contentRange);
+  if (downloadResult.contentLength) {
+    c.header('Content-Length', downloadResult.contentLength);
+  } else if (downloadResult.status === 200 && file.size && !downloadResult.exportedMimeType) {
     c.header('Content-Length', String(file.size));
   }
-  
-  return c.body(stream);
+
+  return c.body(downloadResult.stream, downloadResult.status);
 });

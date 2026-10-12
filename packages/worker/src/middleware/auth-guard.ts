@@ -27,10 +27,10 @@ export const authGuard = createMiddleware<AppContext>(async (c, next) => {
   c.set('userId', session.userId);
   c.set('session', session);
 
-  // Sliding window: extend session TTL on each valid request
-  await c.env.KV.put(`session:${cookie}`, sessionJson, {
-    expirationTtl: 60 * 60 * 24 * 7, // 7 days
-  });
+  // Sessions use a fixed 7-day KV TTL from login. Renewing on every request
+  // exhausts the Workers Free KV daily write quota (1,000/day) and allows
+  // high-traffic routes to make authentication unavailable for everyone.
+  // Re-authentication after expiry is intentional.
 
   await next();
 });

@@ -199,12 +199,12 @@ ${contentsXml}${prefixesXml}</ListBucketResult>`;
 });
 
 // Helpers to resolve virtual folders dynamically
-async function getWorkspaceFolder(db: any, workspaceId: string, folderPath: string): Promise<string | null | undefined> {
+async function getWorkspaceFolder(db: D1Database, workspaceId: string, folderPath: string): Promise<string | null | undefined> {
   if (!folderPath) return null;
   const segments = folderPath.split('/').filter(Boolean);
   let parentId: string | null = null;
   for (const name of segments) {
-    const existing = await db.prepare(`
+    const existing: {id: string} | null = await db.prepare(`
       SELECT id FROM workspace_folders 
       WHERE workspace_id = ? AND name = ? AND (parent_id = ? OR (parent_id IS NULL AND ? IS NULL))
     `).bind(workspaceId, name, parentId, parentId).first<any>();
@@ -214,13 +214,13 @@ async function getWorkspaceFolder(db: any, workspaceId: string, folderPath: stri
   return parentId;
 }
 
-async function getOrCreateWorkspaceFolder(db: any, workspaceId: string, folderPath: string): Promise<string | null> {
+async function getOrCreateWorkspaceFolder(db: D1Database, workspaceId: string, folderPath: string): Promise<string | null> {
   if (!folderPath) return null;
   const segments = folderPath.split('/').filter(Boolean);
   let parentId: string | null = null;
 
   for (const name of segments) {
-    const existing = await db.prepare(`
+    const existing: {id: string} | null = await db.prepare(`
       SELECT id FROM workspace_folders 
       WHERE workspace_id = ? AND name = ? AND (parent_id = ? OR (parent_id IS NULL AND ? IS NULL))
     `).bind(workspaceId, name, parentId, parentId).first<any>();
@@ -325,11 +325,29 @@ s3Router.get('/:bucket/:key{.+}', async (c) => {
     c.env.TOKEN_ENCRYPTION_KEY
   );
 
-  const { stream } = await driveService.downloadFile(file.drive_account_id, file.google_file_id);
-  c.header('Content-Type', file.mime_type || 'application/octet-stream');
-  c.header('Content-Length', String(file.size));
+  const range = c.req.header('Range');
+  let result: Awaited<ReturnType<GoogleDriveService['downloadFile']>>;
+  try {
+    // Preserve ordinary S3 GetObject behavior when there is no Range header.
+    // Native Workspace documents need their MIME type for Google export.
+    result = range
+      ? await driveService.downloadFile(file.drive_account_id, file.google_file_id, file.mime_type, range)
+      : (file.mime_type?.startsWith('application/vnd.google-apps.')
+        ? await driveService.downloadFile(file.drive_account_id, file.google_file_id, file.mime_type)
+        : await driveService.downloadFile(file.drive_account_id, file.google_file_id));
+  } catch (e: any) {
+    if (e?.status === 416) return c.text('Requested range not satisfiable', 416);
+    throw e;
+  }
+  const status = result.status ?? 200; // Keep older download adapters compatible.
+  c.header('Content-Type', result.exportedMimeType || file.mime_type || 'application/octet-stream');
+  if (!result.exportedMimeType) c.header('Accept-Ranges', 'bytes');
+  c.header('Cache-Control', 'private, no-store');
+  if (result.contentRange) c.header('Content-Range', result.contentRange);
+  if (result.contentLength) c.header('Content-Length', result.contentLength);
+  else if (status === 200 && file.size && !result.exportedMimeType) c.header('Content-Length', String(file.size));
   c.header('ETag', `"${getFileETag(file)}"`);
-  return c.body(stream);
+  return c.body(result.stream, status);
 });
 
 // DELETE /s3/:bucket/:key (DeleteObject)
@@ -523,7 +541,7 @@ s3Router.put('/:bucket/:key{.+}', async (c) => {
 });
 
 // Helper to upload a part
-async function handleUploadPart(c: any, uploadId: string, partNumber: number): Promise<Response> {
+async function handleUploadPart(c: import('hono').Context<AppContext>, uploadId: string, partNumber: number): Promise<Response> {
   const userId = c.get('userId');
   const s3WorkspaceId = c.get('s3WorkspaceId') || null;
   const db = c.env.DB;

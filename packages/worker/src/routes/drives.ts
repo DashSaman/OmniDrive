@@ -1,6 +1,4 @@
 import { Hono } from 'hono';
-import { setCookie } from 'hono/cookie';
-import { AppError } from '../middleware/error-handler';
 import type { AppContext } from '../types/env';
 import { authGuard } from '../middleware/auth-guard';
 import { GoogleDriveService } from '../services/google-drive';
@@ -8,8 +6,7 @@ import { syncDriveAccount } from '../services/sync';
 import { mapDriveRow, mapDriveFolderRow, mapFileRow } from '../types';
 import { generateId } from '../lib/id';
 import type { BreadcrumbItem } from '../types';
-import { decryptOrPassthrough } from '../lib/crypto';
-import { generatePKCE } from '../lib/pkce';
+import { beginGoogleOAuth } from '../lib/oauth';
 
 export async function buildDriveBreadcrumb(db: D1Database, driveId: string, googleFolderId: string): Promise<BreadcrumbItem[]> {
   const path: BreadcrumbItem[] = [];
@@ -42,36 +39,7 @@ export const drivesRouter = new Hono<AppContext>({ strict: false });
 
 drivesRouter.use('*', authGuard);
 
-drivesRouter.get('/connect', async (c) => {
-  const env = c.env;
-  
-  if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) {
-    throw new AppError(400, 'Google OAuth is not configured. Please use a Service Account JSON to connect your drives.');
-  }
-
-  const redirectUri = `${env.WORKER_URL}/api/auth/callback`;
-  const scope = 'openid email profile https://www.googleapis.com/auth/drive';
-
-  const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
-  authUrl.searchParams.append('client_id', env.GOOGLE_CLIENT_ID);
-  authUrl.searchParams.append('redirect_uri', redirectUri);
-  authUrl.searchParams.append('response_type', 'code');
-  authUrl.searchParams.append('scope', scope);
-  authUrl.searchParams.append('access_type', 'offline');
-  authUrl.searchParams.append('prompt', 'select_account consent');
-
-  const state = crypto.randomUUID();
-  const { codeVerifier, codeChallenge } = await generatePKCE();
-
-  await env.KV.put(`oauth_state:${state}`, JSON.stringify({ codeVerifier }), { expirationTtl: 600 });
-  setCookie(c, 'oauth_state', state, { path: '/', httpOnly: true, secure: true, maxAge: 60 * 5 });
-  
-  authUrl.searchParams.append('state', state);
-  authUrl.searchParams.append('code_challenge', codeChallenge);
-  authUrl.searchParams.append('code_challenge_method', 'S256');
-
-  return c.redirect(authUrl.toString());
-});
+drivesRouter.get('/connect', beginGoogleOAuth);
 
 drivesRouter.get('/', async (c) => {
   const userId = c.get('userId');
@@ -87,14 +55,10 @@ drivesRouter.get('/', async (c) => {
   const drivesWithQuota = await Promise.all(drives.map(async (drive) => {
     const encryptedTokens = await c.env.KV.get(`tokens:${drive.id}`);
     if (!encryptedTokens) return { ...drive, freeSpace: 0, usagePercent: 0 };
-    const tokenJson = await decryptOrPassthrough(encryptedTokens, c.env.TOKEN_ENCRYPTION_KEY);
 
     try {
       // Use the robust GoogleDriveService which handles token caching & refreshing
       const driveService = new GoogleDriveService(c.env.KV, c.env.GOOGLE_CLIENT_ID, c.env.GOOGLE_CLIENT_SECRET, c.env.TOKEN_ENCRYPTION_KEY);
-      
-      // Ensure available under oauth: prefix for GoogleDriveService
-      await c.env.KV.put(`oauth:${drive.id}`, tokenJson);
       
       const quota = await driveService.getQuota(drive.id);
 
@@ -233,13 +197,10 @@ drivesRouter.post('/:driveId/folders/:googleFolderId/sync', async (c) => {
     });
   }
 
-  // Fetch tokens
+  // Verify encrypted credentials exist; GoogleDriveService decrypts tokens itself.
+  // Never duplicate plaintext OAuth credentials in KV.
   const encryptedTokens = await c.env.KV.get(`tokens:${driveId}`);
   if (!encryptedTokens) return c.json({ error: 'No tokens for drive' }, 400);
-  const tokenJson = await decryptOrPassthrough(encryptedTokens, c.env.TOKEN_ENCRYPTION_KEY);
-
-  // Ensure available under oauth: prefix for GoogleDriveService
-  await c.env.KV.put(`oauth:${driveId}`, tokenJson);
 
   const driveService = new GoogleDriveService(c.env.KV, c.env.GOOGLE_CLIENT_ID, c.env.GOOGLE_CLIENT_SECRET, c.env.TOKEN_ENCRYPTION_KEY);
   const { files: gFiles, folders: gFolders } = await driveService.listFolderContents(driveId, googleFolderId);

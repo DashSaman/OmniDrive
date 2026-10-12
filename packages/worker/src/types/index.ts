@@ -25,6 +25,8 @@ export interface DriveAccount {
   totalQuota: number;
   usedQuota: number;
   quotaUpdatedAt: string | null;
+  syncStatus?: 'idle' | 'syncing' | 'error';
+  lastSyncedAt?: string | null;
   createdAt: string;
 }
 

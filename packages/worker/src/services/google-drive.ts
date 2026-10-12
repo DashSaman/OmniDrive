@@ -201,7 +201,8 @@ export class GoogleDriveService {
     driveAccountId: string,
     fileName: string,
     mimeType: string,
-    parentFolderId: string
+    parentFolderId: string,
+    frontendOrigin?: string
   ): Promise<string> {
     const token = await this.getValidToken(driveAccountId);
 
@@ -213,6 +214,7 @@ export class GoogleDriveService {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
           'X-Upload-Content-Type': mimeType,
+          ...(frontendOrigin ? { Origin: frontendOrigin } : {}),
         },
         body: JSON.stringify({
           name: fileName,
@@ -253,7 +255,7 @@ export class GoogleDriveService {
     return response.json();
   }
 
-  async downloadFile(driveAccountId: string, googleFileId: string, mimeType?: string): Promise<{stream: ReadableStream<Uint8Array>, exportedMimeType?: string, exportedExtension?: string}> {
+  async downloadFile(driveAccountId: string, googleFileId: string, mimeType?: string, range?: string): Promise<{stream: ReadableStream<Uint8Array>, status: 200 | 206, contentLength?: string, contentRange?: string, exportedMimeType?: string, exportedExtension?: string}> {
     const token = await this.getValidToken(driveAccountId);
 
     let url = `${DRIVE_API}/files/${googleFileId}?alt=media`;
@@ -279,12 +281,22 @@ export class GoogleDriveService {
       url = `${DRIVE_API}/files/${googleFileId}/export?mimeType=${exportedMimeType}`;
     }
 
-    const response = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    // Only one byte range is supported. Google Workspace exports cannot be ranged.
+    if (range && (!/^bytes=(?:\d+-\d*|-\d+)$/.test(range) || exportedMimeType)) {
+      throw new GoogleDriveError(416, 'Unsupported byte range');
+    }
+    const requestHeaders: Record<string, string> = { Authorization: `Bearer ${token}` };
+    if (range) requestHeaders.Range = range;
+    const response = await fetch(url, { headers: requestHeaders });
 
+    if (response.status === 416) throw new GoogleDriveError(416, 'Requested range not satisfiable');
     if (!response.ok) {
-      throw new Error(`Failed to download file: ${await response.text()}`);
+      throw new GoogleDriveError(response.status, `Failed to download file: ${response.status}`);
+    }
+    // Never return a full 200 body to a client expecting a partial response.
+    if (range && response.status !== 206) {
+      await response.body?.cancel();
+      throw new GoogleDriveError(502, 'Google Drive did not honor the byte range');
     }
 
     if (!response.body) {
@@ -292,6 +304,9 @@ export class GoogleDriveService {
     }
     return {
       stream: response.body as ReadableStream<Uint8Array>,
+      status: response.status === 206 ? 206 : 200,
+      contentLength: response.headers.get('content-length') ?? undefined,
+      contentRange: response.headers.get('content-range') ?? undefined,
       exportedMimeType,
       exportedExtension
     };

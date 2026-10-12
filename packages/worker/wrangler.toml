@@ -1,22 +1,30 @@
-name = "omnidrive-api"
+name = "omnidrive-family"
 main = "src/index.ts"
+workers_dev = true
+preview_urls = false
 compatibility_date = "2025-06-01"
 compatibility_flags = [ "nodejs_compat_v2" ]
 
+[assets]
+directory = "../web/dist"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api", "/api/*", "/s3", "/s3/*"]
+
 [triggers]
-crons = ["*/30 * * * *"]
+crons = ["0 */6 * * *"]
 
 [[d1_databases]]
 binding = "DB"
-database_name = "omnidrive"
-database_id = "72bd51b7-0869-4ead-9712-a76237904d81"
+database_name = "omnidrive-family-20261012"
+database_id = "315252e2-695d-4f2b-8f86-46d19b8f9d6a"
 
 [[kv_namespaces]]
 binding = "KV"
-id = "e1938e5a2fce4999bd1556612cccfeaa"
+id = "8a4cb4543c624e14bf5e76f695cc45f7"
 
 [vars]
-FRONTEND_URL = "https://omnidrive.pages.dev"
+FRONTEND_URL = "https://omnidrive-family.golamirreza19954312.workers.dev"
+WORKER_URL = "https://omnidrive-family.golamirreza19954312.workers.dev"
 
 [observability]
 enabled = false

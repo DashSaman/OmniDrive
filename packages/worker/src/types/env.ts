@@ -7,6 +7,7 @@ export interface Env {
   WORKER_URL: string;
   JWT_SECRET: string;
   TOKEN_ENCRYPTION_KEY: string;
+  SETUP_TOKEN?: string;
 }
 
 export interface SessionData {
