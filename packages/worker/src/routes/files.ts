@@ -596,32 +596,39 @@ filesRouter.get('/:id/download', async (c) => {
     c.env.TOKEN_ENCRYPTION_KEY
   );
 
-  let stream: ReadableStream<Uint8Array>;
+  let downloadResult: Awaited<ReturnType<GoogleDriveService['downloadFile']>>;
   let finalMimeType = (file.mime_type as string) || 'application/octet-stream';
   let finalFileName = file.name as string;
 
   try {
-    const downloadResult = await driveService.downloadFile(
+    downloadResult = await driveService.downloadFile(
       file.drive_account_id as string,
       file.google_file_id as string,
-      file.mime_type as string
+      file.mime_type as string,
+      c.req.header('Range')
     );
-    stream = downloadResult.stream;
     
     if (downloadResult.exportedMimeType && downloadResult.exportedExtension) {
       finalMimeType = downloadResult.exportedMimeType;
       finalFileName = `${finalFileName}${downloadResult.exportedExtension}`;
     }
   } catch (e: any) {
+    if (e?.status === 416) return c.text('Requested range not satisfiable', 416);
     console.error('Download error:', e);
     return c.text('Failed to download file', 502);
   }
-  
+
+  c.header('Cache-Control', 'private, no-store');
   c.header('Content-Type', finalMimeType);
-  c.header('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(finalFileName)}`);
-  if (file.size && !finalFileName.endsWith('.pdf') && !finalFileName.endsWith('.xlsx')) {
+  const disposition = c.req.query('inline') === '1' ? 'inline' : 'attachment';
+  c.header('Content-Disposition', `${disposition}; filename*=UTF-8''${encodeURIComponent(finalFileName)}`);
+  if (!downloadResult.exportedMimeType) c.header('Accept-Ranges', 'bytes');
+  if (downloadResult.contentRange) c.header('Content-Range', downloadResult.contentRange);
+  if (downloadResult.contentLength) {
+    c.header('Content-Length', downloadResult.contentLength);
+  } else if (downloadResult.status === 200 && file.size && !downloadResult.exportedMimeType) {
     c.header('Content-Length', String(file.size));
   }
-  
-  return c.body(stream);
+
+  return c.body(downloadResult.stream, downloadResult.status);
 });
