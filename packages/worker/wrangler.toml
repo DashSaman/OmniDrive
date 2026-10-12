@@ -9,14 +9,15 @@ crons = ["*/30 * * * *"]
 [[d1_databases]]
 binding = "DB"
 database_name = "omnidrive"
-database_id = "72bd51b7-0869-4ead-9712-a76237904d81"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
 
 [[kv_namespaces]]
 binding = "KV"
-id = "e1938e5a2fce4999bd1556612cccfeaa"
+id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
 
 [vars]
-FRONTEND_URL = "https://omnidrive.pages.dev"
+FRONTEND_URL = "https://REPLACE_WITH_YOUR_PAGES_PROJECT.pages.dev"
+WORKER_URL = "https://REPLACE_WITH_YOUR_WORKERS_SUBDOMAIN.workers.dev"
 
 [observability]
 enabled = false
